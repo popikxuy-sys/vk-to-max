@@ -244,9 +244,12 @@ def send_to_max(chat_id, text, max_attachments):
 
 def publish_post(post, chat_id, last_id):
     pid = post.get("id")
-    if post.get("post_type") != "post" or pid is None:
+    ptype = post.get("post_type")
+    if ptype != "post" or pid is None:
+        print(f"[Пропуск] пост id={pid}, post_type={ptype!r} — не обычная запись")
         return False
     if last_id is not None and pid <= last_id:
+        print(f"[Пропуск] пост id={pid} уже публиковался (last_id={last_id})")
         return False
     if pid in sent_posts:
         return False
@@ -262,6 +265,7 @@ def publish_post(post, chat_id, last_id):
 
 def process_events(events, chat_id, skip):
     """Обрабатывает пачку событий. skip=True — пачку только запоминаем (первый запуск)."""
+    print(f"[LP] событий в пачке: {len(events)} | типы: {[ev.get('type') for ev in events]}")
     posts = [ev.get("object", {}) for ev in events if ev.get("type") == "wall_post_new"]
     if not posts:
         return 0
