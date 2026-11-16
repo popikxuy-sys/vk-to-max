@@ -17,17 +17,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - name: Зависимости
         run: pip install -r requirements.txt
+
       - name: Перенос постов
         env:
           VK_TOKEN: ${{ secrets.VK_TOKEN }}
           MAX_TOKEN: ${{ secrets.MAX_TOKEN }}
         run: python vk_to_max.py --once --wait 5
+
       - name: Сохранить точку отсчёта
         run: |
           git config user.name "github-actions[bot]"
@@ -35,7 +41,11 @@ jobs:
           git add .state
           if git diff --cached --quiet; then
             echo "Изменений нет"
-          else
-            git commit -m "state: last post id [skip ci]"
-            git push
+            exit 0
           fi
+          git commit -m "state: last post id [skip ci]"
+          for i in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push && break
+            echo "Повтор push ($i)..."
+            sleep 5
+          done
