@@ -17,6 +17,7 @@
   MAX_TOKEN = "f9LHodD0c...."
 """
 import argparse
+import json
 import os
 import sys
 import time
@@ -44,26 +45,38 @@ MAX_CHAT_ID = -81162970548366
 MAX_API_BASE = "https://platform-api2.max.ru"
 CHANNEL_NAME_MARKER = "молодежный совет"
 
-STATE_FILE = os.path.join(".state", "last_post_molsovet.txt")
+STATE_FILE = os.path.join(".state", "state.json")
 POLL_INTERVAL_SEC = 60
 
 sent_posts = deque(maxlen=200)
 
 
+def load_state():
+    """Возвращает {"last_post_id": int|None, "ts": str|None}."""
+    if not os.path.exists(STATE_FILE):
+        return {"last_post_id": None, "ts": None}
+    with open(STATE_FILE, "r", encoding="utf-8-sig") as f:
+        data = json.load(f)
+    last_id = data.get("last_post_id")
+    ts = data.get("ts")
+    return {"last_post_id": int(last_id) if last_id is not None else None,
+            "ts": str(ts) if ts is not None else None}
+
+
+def save_state(last_post_id, ts):
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    data = {"last_post_id": last_post_id, "ts": ts}
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+
 def load_last_post_id():
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
-                return int(f.read().strip())
-        except Exception:
-            pass
-    return None
+    return load_state()["last_post_id"]
 
 
 def save_last_post_id(post_id):
-    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        f.write(str(post_id))
+    st = load_state()
+    save_state(post_id, st["ts"])
 
 
 def check_chat_info(chat_id):
@@ -292,8 +305,18 @@ def run_once(minutes_budget):
     if not lp:
         return 1
 
-    server, key, ts = lp["server"], lp["key"], lp["ts"]
-    first_run = load_last_post_id() is None
+    try:
+        state = load_state()
+    except Exception as e:
+        print(f"[Остановка] Файл состояния {STATE_FILE} повреждён: {e}")
+        print("Удалите его или исправьте JSON, иначе можно повторно опубликовать старые посты.")
+        return 1
+    saved_ts = state["ts"]
+    saved_id = state["last_post_id"]
+    server, key = lp["server"], lp["key"]
+    # Если сохранена позиция — продолжаем с неё, иначе берём текущую.
+    ts = saved_ts if saved_ts else lp["ts"]
+    first_run = saved_id is None and not saved_ts
     deadline = time.time() + minutes_budget * 60
     total = 0
     print(f"Long Poll запущен, окно {minutes_budget} мин (стартовый ts={ts}).")
@@ -311,9 +334,11 @@ def run_once(minutes_budget):
             lp = get_long_poll_server(group_id)
             if not lp:
                 break
-            server, key, ts = lp["server"], lp["key"], lp["ts"]
+            server, key = lp["server"], lp["key"]
+            if res.get("failed") == 3:
+                ts = lp["ts"]
             continue
-        ts = res.get("ts", ts)
+        ts = str(res.get("ts", ts))
         events = res.get("updates", [])
         if events:
             total += process_events(events, chat_id, skip=first_run)
@@ -321,7 +346,8 @@ def run_once(minutes_budget):
         elif first_run:
             first_run = False
             if load_last_post_id() is None:
-                save_last_post_id(0)
+                save_state(0, ts)
+        save_state(load_last_post_id(), ts)
 
     print(f"Готово: опубликовано новых постов — {total}.")
     return 0
@@ -335,8 +361,14 @@ def run_forever():
     lp = get_long_poll_server(group_id)
     if not lp:
         return 1
-    server, key, ts = lp["server"], lp["key"], lp["ts"]
-    first_run = load_last_post_id() is None
+    try:
+        state = load_state()
+    except Exception as e:
+        print(f"[Остановка] Файл состояния {STATE_FILE} повреждён: {e}")
+        return 1
+    server, key = lp["server"], lp["key"]
+    ts = state["ts"] if state["ts"] else lp["ts"]
+    first_run = state["last_post_id"] is None and not state["ts"]
     print("Ожидание новых записей на стене (Ctrl+C для остановки)...")
     while True:
         try:
@@ -347,13 +379,16 @@ def run_forever():
                 if not lp:
                     time.sleep(20)
                     continue
-                server, key, ts = lp["server"], lp["key"], lp["ts"]
+                server, key = lp["server"], lp["key"]
+                if res.get("failed") == 3:
+                    ts = lp["ts"]
                 continue
-            ts = res.get("ts", ts)
+            ts = str(res.get("ts", ts))
             events = res.get("updates", [])
             if events:
                 process_events(events, chat_id, skip=first_run)
                 first_run = False
+            save_state(load_last_post_id(), ts)
         except KeyboardInterrupt:
             print("\nОстановлено пользователем.")
             return 0
