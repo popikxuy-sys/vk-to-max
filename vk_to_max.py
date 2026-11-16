@@ -77,6 +77,19 @@ def check_chat_info(chat_id):
     return None
 
 
+def check_bot_role(chat_id):
+    """Возвращает (is_admin, is_owner) или (None, None), если проверить не удалось."""
+    try:
+        r = requests.get(f"{MAX_API_BASE}/chats/{chat_id}/members/me",
+                         headers={"Authorization": MAX_TOKEN}, timeout=15, verify=False)
+        if r.status_code == 200:
+            j = r.json()
+            return bool(j.get("is_admin")), bool(j.get("is_owner"))
+    except Exception:
+        pass
+    return None, None
+
+
 def get_max_channel_id():
     info = check_chat_info(MAX_CHAT_ID)
     if not info:
@@ -86,7 +99,12 @@ def get_max_channel_id():
     if CHANNEL_NAME_MARKER not in title.lower():
         print(f"[Остановка] Канал {MAX_CHAT_ID} называется «{title}» — это не целевой канал.")
         return None
-    print(f"MAX: канал «{title}» (ID: {MAX_CHAT_ID})")
+    is_admin, is_owner = check_bot_role(MAX_CHAT_ID)
+    if is_admin is False and is_owner is False:
+        print(f"[Остановка] Бот не администратор канала «{title}» (ID: {MAX_CHAT_ID}).")
+        print("Добавьте бота в администраторы канала MAX с правом публикации сообщений, иначе посты теряются.")
+        return None
+    print(f"MAX: канал «{title}» (ID: {MAX_CHAT_ID}), бот — администратор")
     return MAX_CHAT_ID
 
 
