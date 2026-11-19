@@ -330,13 +330,17 @@ def run_once(minutes_budget):
             time.sleep(5)
             continue
         if "failed" in res:
-            print(f"Long Poll: failed={res.get('failed')}, переподключаюсь.")
+            code = res.get("failed")
+            print(f"Long Poll: failed={code}, переподключаюсь.")
             lp = get_long_poll_server(group_id)
             if not lp:
                 break
             server, key = lp["server"], lp["key"]
-            if res.get("failed") == 3:
+            if code in (1, 3):
+                # очередь устарела: продолжаем с текущей позиции
+                print("Позиция очереди устарела, продолжаю с текущей (часть событий могла не дойти).")
                 ts = lp["ts"]
+                save_state(load_last_post_id(), ts)
             continue
         ts = str(res.get("ts", ts))
         events = res.get("updates", [])
@@ -380,8 +384,9 @@ def run_forever():
                     time.sleep(20)
                     continue
                 server, key = lp["server"], lp["key"]
-                if res.get("failed") == 3:
+                if res.get("failed") in (1, 3):
                     ts = lp["ts"]
+                    save_state(load_last_post_id(), ts)
                 continue
             ts = str(res.get("ts", ts))
             events = res.get("updates", [])
