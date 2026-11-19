@@ -2,7 +2,7 @@ name: VK -> MAX
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "0 */4 * * *"
   workflow_dispatch:
 
 permissions:
@@ -15,7 +15,7 @@ concurrency:
 jobs:
   transfer:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 320
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,7 +32,7 @@ jobs:
         env:
           VK_TOKEN: ${{ secrets.VK_TOKEN }}
           MAX_TOKEN: ${{ secrets.MAX_TOKEN }}
-        run: python vk_to_max.py --once --wait 5
+        run: python vk_to_max.py --once --wait 250
 
       - name: Сохранить точку отсчёта
         run: |
