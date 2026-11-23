@@ -255,6 +255,30 @@ def send_to_max(chat_id, text, max_attachments):
     return False
 
 
+def norm_text(text):
+    return " ".join((text or "").split())
+
+
+def already_in_channel(chat_id, text):
+    """Проверяет, нет ли уже такого текста среди последних сообщений канала."""
+    target = norm_text(text)
+    if not target:
+        return False
+    try:
+        r = requests.get(f"{MAX_API_BASE}/messages",
+                         params={"chat_id": chat_id, "count": 10},
+                         headers={"Authorization": MAX_TOKEN}, timeout=20, verify=False)
+        if r.status_code != 200:
+            return False
+        for m in r.json().get("messages", []):
+            body = m.get("body") or {}
+            if norm_text(body.get("text")) == target:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def publish_post(post, chat_id, last_id):
     pid = post.get("id")
     ptype = post.get("post_type")
@@ -269,6 +293,11 @@ def publish_post(post, chat_id, last_id):
     print(f"\n[ВК] Новый пост ID {pid}")
     text, atts = parse_post_content(post)
     print(f" - текст: {len(text)} симв., вложений: {len(atts)}")
+    if already_in_channel(chat_id, text):
+        print(" - такой пост уже есть в канале, повторно не отправляю.")
+        sent_posts.append(pid)
+        save_last_post_id(pid)
+        return False
     if send_to_max(chat_id, text, atts):
         sent_posts.append(pid)
         save_last_post_id(pid)
@@ -334,13 +363,15 @@ def run_once(minutes_budget):
             print(f"Long Poll: failed={code}, переподключаюсь.")
             lp = get_long_poll_server(group_id)
             if not lp:
-                break
+                time.sleep(10)
+                continue
             server, key = lp["server"], lp["key"]
-            if code in (1, 3):
-                # очередь устарела: продолжаем с текущей позиции
-                print("Позиция очереди устарела, продолжаю с текущей (часть событий могла не дойти).")
-                ts = lp["ts"]
+            # при любом сбое продолжаем с актуальной позиции, иначе цикл переподключений
+            if code in (1, 2, 3):
+                print("Позиция/ключ устарели, продолжаю с текущей позиции.")
+                ts = str(lp["ts"])
                 save_state(load_last_post_id(), ts)
+            time.sleep(3)
             continue
         ts = str(res.get("ts", ts))
         events = res.get("updates", [])
@@ -384,9 +415,10 @@ def run_forever():
                     time.sleep(20)
                     continue
                 server, key = lp["server"], lp["key"]
-                if res.get("failed") in (1, 3):
-                    ts = lp["ts"]
+                if res.get("failed") in (1, 2, 3):
+                    ts = str(lp["ts"])
                     save_state(load_last_post_id(), ts)
+                time.sleep(3)
                 continue
             ts = str(res.get("ts", ts))
             events = res.get("updates", [])
